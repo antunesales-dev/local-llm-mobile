@@ -47,7 +47,7 @@ namespace {
 
     llama_sampler *create_sampler(float temperature, float top_p, int top_k, float repeat_penalty) {
         auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
-        llama_sampler_chain_add(smpl, llama_sampler_init_penalties(repeat_penalty, 0.0f, 0.0f, 0, false));
+        llama_sampler_chain_add(smpl, llama_sampler_init_penalties(0, repeat_penalty, 0.0f, 0.0f));
         llama_sampler_chain_add(smpl, llama_sampler_init_top_k(top_k));
         llama_sampler_chain_add(smpl, llama_sampler_init_top_p(top_p, 1));
         llama_sampler_chain_add(smpl, llama_sampler_init_temp(temperature));
@@ -139,7 +139,7 @@ Java_com_localllm_chat_llm_LlamaBridge_generate(
 
     std::vector<llama_token> tokens = common_tokenize(vocab, prompt_str, true, true);
 
-    llama_kv_cache_clear(g_session.ctx);
+    llama_kv_self_clear(g_session.ctx);
 
     llama_batch batch = llama_batch_init(tokens.size(), 0, 1);
     for (size_t i = 0; i < tokens.size(); i++) {
@@ -231,7 +231,7 @@ Java_com_localllm_chat_llm_LlamaBridge_applyChatTemplate(
     }
 
     int n_messages = env->GetArrayLength(roles);
-    std::vector<llama_chat_msg> messages(n_messages);
+    std::vector<llama_chat_message> messages(n_messages);
     std::vector<std::string> role_strings(n_messages);
     std::vector<std::string> content_strings(n_messages);
 
@@ -251,8 +251,15 @@ Java_com_localllm_chat_llm_LlamaBridge_applyChatTemplate(
         env->ReleaseStringUTFChars(content_jstr, content);
     }
 
-    const llama_vocab *vocab = llama_model_get_vocab(g_session.model);
-    std::string formatted = common_chat_apply_template(vocab, "", messages, true);
+    // First call with nullptr buf to get required size
+    int32_t len = llama_chat_apply_template(nullptr, messages.data(), n_messages, true, nullptr, 0);
+    if (len < 0) {
+        return env->NewStringUTF("");
+    }
+
+    std::vector<char> buf(len + 1);
+    llama_chat_apply_template(nullptr, messages.data(), n_messages, true, buf.data(), buf.size());
+    std::string formatted(buf.data(), len);
 
     return env->NewStringUTF(formatted.c_str());
 }
